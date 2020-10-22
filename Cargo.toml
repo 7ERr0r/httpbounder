@@ -6,19 +6,18 @@ edition = "2018"
 
 
 [dependencies]
-actix-web = "3"
-awc = "2"
-anyhow = "*"
-derive_more = "*"
-base64 = "*"
-futures = "*"
-actix-rt = "*"
+actix-web = "3.1"
+anyhow = "1.0"
+derive_more = "0.99"
+base64 = "0.13"
+futures = "0.3"
+actix-rt = "1.1"
 tokio = { version = "0.2", features = ["sync", "fs", "time", "io-util"]}
-reqwest = "*"
-twoway = "*"
-clap = "*"
-serde = "*"
-serde_derive = "*"
+reqwest = "0.10"
+twoway = "0.2"
+clap = "2.33"
+serde = "1.0"
+serde_derive = "1.0"
 toml = "0.5"
 
 # [target.'cfg(unix)'.dependencies]

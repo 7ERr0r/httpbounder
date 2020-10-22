@@ -373,9 +373,7 @@ async fn run() -> Result<(), anyhow::Error> {
 
     let registry = Box::new(registry);
     HttpServer::new(move || {
-        //let channels = *channels.clone();
         let registry = *registry.clone();
-        //let output_path = output_path.clone();
 
         let app = App::new().data(registry);
 
