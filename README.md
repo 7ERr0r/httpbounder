@@ -34,3 +34,10 @@ chunk: b"Content-Type: image/jpeg\r\nContent-Length: 189712\r\n\r\n\xff\xdd\x69\
 
 Client has to receive: `--myboundary\r\n` bytes first.
 Chunks of bytes are split in order to broadcast valid streams.
+
+Resulting in:
+```
+chunk: b"--myboundary\r\n"
+chunk: b"Motion-Event: 0\r\n"
+chunk: b"Content-Type: image/jpeg\r\nContent-Length: 189712\r\n\r\n\xff\xdd\x69\x69\x69"
+```
