@@ -10,6 +10,7 @@ use actix_web::web::Bytes;
 use core::pin::Pin;
 use core::task::Context;
 use core::task::Poll;
+use std::collections::HashMap;
 use tokio::sync::mpsc::Sender;
 
 use reqwest::header::ACCEPT;
@@ -30,29 +31,39 @@ use crate::mjpeg_marker::MJPEGStartMarker;
 
 const USER_AGENT: &str = "Httpbounder (Rust/reqwest)";
 
-
 async fn forward(
-    _req: HttpRequest,
-    bc_mutex: web::Data<Arc<Mutex<BroadcastChannel>>>,
+    req: HttpRequest,
+    reg_mutex: web::Data<Arc<Mutex<BroadcastRegistry>>>,
 ) -> Result<HttpResponse, Error> {
-    let mut bc = bc_mutex.lock().await;
-    let mut client_resp = HttpResponse::build(bc.status);
-    let headers = &bc.headers;
+    let mut reg = reg_mutex.lock().await;
 
-    for (header_name, header_value) in headers {
-        client_resp.header(header_name.clone(), header_value.clone());
+    let path = req.head().uri.path();
+    //println!("path: {}", path);
+    let opt_channel = reg.map.get_mut(path);
+    match opt_channel {
+        None => {
+            let mut client_resp = HttpResponse::build(StatusCode::NOT_FOUND);
+            let b = Bytes::from_static(b"stream not found");
+            Ok(client_resp.body(Body::Bytes(b)))
+        }
+        Some(channel) => {
+            let mut bc = channel.lock().await;
+            let mut client_resp = HttpResponse::build(bc.status);
+            let headers = &bc.headers;
+            for (header_name, header_value) in headers {
+                client_resp.header(header_name.clone(), header_value.clone());
+            }
+            //println!("{:?}", &res.headers());
+            let (tx, rx) = tokio::sync::mpsc::channel::<BcData>(256);
+            bc.tx_vec.push(BroadcastSender {
+                tx,
+                header_sent: false,
+            });
+            drop(bc);
+            let msg = Box::new(ReceiverBodyStream { rx });
+            Ok(client_resp.body(Body::Message(msg)))
+        }
     }
-    //println!("{:?}", &res.headers());
-
-    let (tx, rx) = tokio::sync::mpsc::channel::<BcData>(256);
-    bc.tx_vec.push(BroadcastSender {
-        tx,
-        header_sent: false,
-    });
-
-    drop(bc);
-    let msg = Box::new(ReceiverBodyStream { rx });
-    Ok(client_resp.body(Body::Message(msg)))
 }
 
 struct ReceiverBodyStream {
@@ -106,14 +117,26 @@ impl BroadcastChannel {
     }
 }
 
+struct BroadcastRegistry {
+    map: HashMap<String, Arc<Mutex<BroadcastChannel>>>,
+}
+
+impl BroadcastRegistry {
+    fn new() -> Self {
+        Self {
+            map: HashMap::new(),
+        }
+    }
+}
+
 struct ClientSession {
-    sconfig: SourceClientConfig,
+    sconfig: ProxyStreamConfig,
     client: reqwest::Client,
     channels: Arc<Mutex<BroadcastChannel>>,
 }
 
 impl ClientSession {
-    fn new(sconfig: SourceClientConfig, channels: Arc<Mutex<BroadcastChannel>>) -> Self {
+    fn new(sconfig: ProxyStreamConfig, channels: Arc<Mutex<BroadcastChannel>>) -> Self {
         let client = reqwest::Client::builder()
             .user_agent(USER_AGENT)
             .build()
@@ -212,7 +235,7 @@ impl ClientSession {
         Ok(())
     }
 }
-async fn fetcher(sconfig: SourceClientConfig, bc: Arc<Mutex<BroadcastChannel>>) {
+async fn fetcher(sconfig: ProxyStreamConfig, bc: Arc<Mutex<BroadcastChannel>>) {
     let mut sess = ClientSession::new(sconfig, bc.clone());
     loop {
         let res = sess.run().await;
@@ -226,9 +249,10 @@ async fn fetcher(sconfig: SourceClientConfig, bc: Arc<Mutex<BroadcastChannel>>) 
         tokio::time::delay_for(sleep_duration).await;
     }
 }
-struct SourceClientConfig {
+struct ProxyStreamConfig {
     user: Option<String>,
     url: String,
+    output_path: String,
 }
 
 async fn run() -> Result<(), anyhow::Error> {
@@ -279,16 +303,23 @@ async fn run() -> Result<(), anyhow::Error> {
 
     let bind_addr = matches.value_of("bind").unwrap().to_string();
 
-    let sconfig = SourceClientConfig {
+    let sconfig = ProxyStreamConfig {
         user,
         url: stream_link.to_string(),
+        output_path: output_path.clone(),
     };
 
     // #[cfg(target_os = "linux")]
     // let guard = pprof::ProfilerGuard::new(100).unwrap();
 
-    let channels = Arc::new(Mutex::new(BroadcastChannel::new()));
+    let registry = Arc::new(Mutex::new(BroadcastRegistry::new()));
 
+    // TODO multiple proxy streams
+    let channels = Arc::new(Mutex::new(BroadcastChannel::new()));
+    {
+        let mut reg = registry.lock().await;
+        reg.map.insert(output_path, channels.clone());
+    }
     let channels_clone = channels.clone();
     actix_rt::Arbiter::spawn(async {
         fetcher(sconfig, channels_clone).await;
@@ -306,15 +337,20 @@ async fn run() -> Result<(), anyhow::Error> {
     //     };
     // });
 
-    let channels = Box::new(channels);
+    //let channels = Box::new(channels);
 
+    let registry = Box::new(registry);
     HttpServer::new(move || {
-        let channels = *channels.clone();
-        let output_path = output_path.clone();
+        //let channels = *channels.clone();
+        let registry = *registry.clone();
+        //let output_path = output_path.clone();
 
-        App::new()
-            .data(channels)
-            .service(web::resource(output_path).route(web::route().to(forward)))
+        let app = App::new()
+            .data(registry);
+
+        let app = app.service(web::resource("/{stream:[^{}/]*}").route(web::route().to(forward)));
+
+        app
     })
     .bind(bind_addr)?
     .run()
