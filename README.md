@@ -16,12 +16,21 @@ OPTIONS:
 
 ```
 
-Example
-===
-
+## Example
 ```
 ./httpbounder -i "http://192.168.0.3/mjpg/video.mjpg" -u "admin:pass" -o "/broadcast.mjpg"
 ```
 ```
 curl http://127.0.0.1:8080/broadcast.mjpg
 ```
+
+## How it works
+Typical stream:
+```
+chunk: b"\x69\x69\x69\x69\x69\x69\r\n--myboundary\r\n"
+chunk: b"Motion-Event: 0\r\n"
+chunk: b"Content-Type: image/jpeg\r\nContent-Length: 189712\r\n\r\n\xff\xdd\x69\x69\x69"
+```
+
+Client has to receive: `--myboundary\r\n` bytes first.
+Chunks of bytes are split in order to broadcast valid streams.
