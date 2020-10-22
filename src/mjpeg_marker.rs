@@ -78,7 +78,7 @@ impl MJPEGStartMarker {
             Some(bound) => {
                 // TODO what if boundary sits half-way through bytes chunks?
 
-                const FAST_BOUND_SEARCH: bool = true;
+                const FAST_BOUND_SEARCH: bool = false;
                 if FAST_BOUND_SEARCH {
                     if chunk.ends_with(&bound) {
                         let mut a = chunk.clone();

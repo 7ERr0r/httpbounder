@@ -13,7 +13,7 @@ derive_more = "*"
 base64 = "*"
 futures = "*"
 actix-rt = "*"
-tokio = { version = "*", features = ["sync", "fs"]}
+tokio = { version = "0.2", features = ["sync", "fs", "time", "io-util"]}
 reqwest = "*"
 twoway = "*"
 clap = "*"
