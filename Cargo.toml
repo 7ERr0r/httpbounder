@@ -13,10 +13,13 @@ derive_more = "*"
 base64 = "*"
 futures = "*"
 actix-rt = "*"
-tokio = { version = "*", features = ["sync"]}
+tokio = { version = "*", features = ["sync", "fs"]}
 reqwest = "*"
 twoway = "*"
 clap = "*"
+serde = "*"
+serde_derive = "*"
+toml = "0.5"
 
 # [target.'cfg(unix)'.dependencies]
 # pprof = { version = "0.3", features = ["flamegraph"] } 

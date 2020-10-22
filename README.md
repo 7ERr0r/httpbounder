@@ -41,3 +41,17 @@ chunk: b"--myboundary\r\n"
 chunk: b"Motion-Event: 0\r\n"
 chunk: b"Content-Type: image/jpeg\r\nContent-Length: 189712\r\n\r\n\xff\xdd\x69\x69\x69"
 ```
+
+## Multiple streams
+`Streams.toml`:
+
+```
+[[streams]]
+user = "admin:pass"
+url = "http://192.168.0.3/mjpg/video.mjpg"
+output_path = "/cam1"
+```
+
+```
+./httpbounder -i "Streams.toml"
+```

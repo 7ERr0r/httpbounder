@@ -249,6 +249,14 @@ async fn fetcher(sconfig: ProxyStreamConfig, bc: Arc<Mutex<BroadcastChannel>>) {
         tokio::time::delay_for(sleep_duration).await;
     }
 }
+use serde_derive::Deserialize;
+
+#[derive(Deserialize, Clone, Debug)]
+struct StreamsConfig {
+    streams: Vec<ProxyStreamConfig>,
+}
+
+#[derive(Deserialize, Clone, Debug)]
 struct ProxyStreamConfig {
     user: Option<String>,
     url: String,
@@ -293,7 +301,7 @@ async fn run() -> Result<(), anyhow::Error> {
         )
         .get_matches();
 
-    let stream_link = matches
+    let input = matches
         .value_of("input")
         .ok_or(HttpBounderError::UrlNotProvided)?;
 
@@ -303,10 +311,27 @@ async fn run() -> Result<(), anyhow::Error> {
 
     let bind_addr = matches.value_of("bind").unwrap().to_string();
 
-    let sconfig = ProxyStreamConfig {
-        user,
-        url: stream_link.to_string(),
-        output_path: output_path.clone(),
+    let sconfigs = if input.starts_with("http") {
+        let mut v = Vec::new();
+        v.push(ProxyStreamConfig {
+            user,
+            url: input.to_string(),
+            output_path: output_path.clone(),
+        });
+        v
+    } else {
+        use tokio::prelude::*;
+        let mut file = tokio::fs::File::open(input)
+            .await
+            .map_err(|err| HttpBounderError::OpenBounderConfig(err))?;
+
+        let mut contents = Vec::new();
+        file.read_to_end(&mut contents)
+            .await
+            .map_err(|err| HttpBounderError::ReadBounderConfig(err))?;
+
+        let c: StreamsConfig = toml::from_slice(&contents)?;
+        c.streams
     };
 
     // #[cfg(target_os = "linux")]
@@ -314,16 +339,23 @@ async fn run() -> Result<(), anyhow::Error> {
 
     let registry = Arc::new(Mutex::new(BroadcastRegistry::new()));
 
-    // TODO multiple proxy streams
-    let channels = Arc::new(Mutex::new(BroadcastChannel::new()));
-    {
-        let mut reg = registry.lock().await;
-        reg.map.insert(output_path, channels.clone());
+    for sconfig in &sconfigs {
+        let channels = Arc::new(Mutex::new(BroadcastChannel::new()));
+        {
+            let mut reg = registry.lock().await;
+            let old = reg
+                .map
+                .insert(sconfig.output_path.clone(), channels.clone());
+            if old.is_some() {
+                return Err(HttpBounderError::PathCollision(sconfig.output_path.clone()).into());
+            }
+        }
+        let channels_clone = channels.clone();
+        let sconfig_clone = (*sconfig).clone();
+        actix_rt::Arbiter::spawn(async {
+            fetcher(sconfig_clone, channels_clone).await;
+        });
     }
-    let channels_clone = channels.clone();
-    actix_rt::Arbiter::spawn(async {
-        fetcher(sconfig, channels_clone).await;
-    });
 
     // #[cfg(target_os = "linux")]
     // actix_rt::Arbiter::spawn(async move {
@@ -345,8 +377,7 @@ async fn run() -> Result<(), anyhow::Error> {
         let registry = *registry.clone();
         //let output_path = output_path.clone();
 
-        let app = App::new()
-            .data(registry);
+        let app = App::new().data(registry);
 
         let app = app.service(web::resource("/{stream:[^{}/]*}").route(web::route().to(forward)));
 
@@ -375,5 +406,14 @@ async fn main() -> std::io::Result<()> {
 pub enum HttpBounderError {
     #[display(fmt = "UrlNotProvided: --url")]
     UrlNotProvided,
+
+    #[display(fmt = "OpenBounderConfig: {}", _0)]
+    OpenBounderConfig(std::io::Error),
+
+    #[display(fmt = "ReadBounderConfig: {}", _0)]
+    ReadBounderConfig(std::io::Error),
+
+    #[display(fmt = "PathCollision: {}", _0)]
+    PathCollision(String),
 }
 impl std::error::Error for HttpBounderError {}
